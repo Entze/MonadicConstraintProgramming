@@ -43,30 +43,35 @@ import Util.Num
 
 data Constraint a = Constraint { constraintType :: ConstraintType, factors :: [a], refs :: [VariableRef], constant :: a }
 
-data ConstraintType = LinearEQ | LinearLT | BooleanConjunction deriving (Show, Enum, Ord, Eq, Bounded)
+deriving instance (Show a) => Show (Constraint a)
+deriving instance (Eq a) => Eq (Constraint a)
 
+data ConstraintType = LinearEQ | LinearNE | LinearLT | BooleanConjunction deriving (Show, Enum, Ord, Eq, Bounded)
+
+combineOperator :: (Foldable t) => ConstraintType -> t Integer -> Integer
 combineOperator LinearEQ = sum
 combineOperator LinearLT = sum
+combineOperator LinearNE = sum
 combineOperator BooleanConjunction = integerAnd
 
 
 compareOperator :: (Eq a, Ord a) => ConstraintType -> (a -> a -> Bool)
 compareOperator LinearEQ = (==)
+compareOperator LinearNE = (/=)
 compareOperator LinearLT = (<)
 compareOperator BooleanConjunction = (==)
 
 factorOperator :: ConstraintType -> (Integer -> Integer -> Integer)
 factorOperator LinearEQ = (*)
+factorOperator LinearNE = (*)
 factorOperator LinearLT = (*)
 factorOperator BooleanConjunction = (⊻!)
 
 defaultFactor :: ConstraintType -> Integer
 defaultFactor LinearEQ = 1
+defaultFactor LinearNE = 1
 defaultFactor LinearLT = 1
 defaultFactor BooleanConjunction = 0
-
-deriving instance (Show a) => Show (Constraint a)
-deriving instance (Eq a) => Eq (Constraint a)
 
 isSat ::  Constraint Integer -> [Variable Integer] -> Maybe Bool
 isSat cons vars = (return . not . null) =<< listSat cons vars
