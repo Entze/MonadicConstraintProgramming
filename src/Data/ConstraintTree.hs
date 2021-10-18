@@ -2,17 +2,17 @@ module Data.ConstraintTree where
 
 import Prelude (Integer)
 
+import Control.Applicative (Applicative(..))
 import Control.Monad (Monad(..),
                       (>=>),
                       ap,
                       liftM)
-import Control.Applicative (Applicative(..))
 
 import Data.Functor (Functor(..))
 import Data.List ()
 
-import Data.Variable
 import Data.Constraint
+import Data.Variable
 
 data ConstraintTree solver result
   = Res result

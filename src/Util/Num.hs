@@ -1,8 +1,13 @@
 module Util.Num where
 
-accumulateSums :: (Num a) => [[a]] -> [a]
-accumulateSums [v] = v
-accumulateSums (v:vs) = [ n + a | n <- v, a <- accumulated]
-  where
-    accumulated = accumulateSums vs
-accumulateSums [] = []
+integerAnd :: (Foldable t) => t Integer -> Integer
+integerAnd = fromIntegral . fromEnum . all (== 1)
+
+integerOr :: (Foldable t) => t Integer -> Integer
+integerOr = fromIntegral . fromEnum . elem 1
+
+(⊻!) :: Integer -> Integer -> Integer
+(⊻!) 0 0 = 0
+(⊻!) 0 _ = 1
+(⊻!) _ 0 = 1
+(⊻!) _ _ = 0
