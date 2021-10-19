@@ -18,6 +18,9 @@ library
   exposed-modules:     Data.Constraint
                      , Data.Domain
                      , Data.Variable
+                     , Util.Bool
+                     , Util.Bool.Instances
+                     , Util.Instances
                      , Util.Num
                      , Util.List
                      , Util.Stream

@@ -34,7 +34,7 @@ instance (Show a) => Show (Variable a) where
       dsl = List.map show d'
       d' = List.take 5 d
       b = (List.length . List.take 6) d == List.length d'
-      ad = if b then "" else ", ..."
+      ad = if b then "" else ",..."
 
 
 newUnnamedVar_ :: (Domain a) => Variable a

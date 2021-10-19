@@ -1,15 +1,17 @@
-{-# LANGUAGE StandaloneDeriving #-}
 module Data.Constraint where
 
 import Prelude (Num(..),
                 Show,
-                Enum,
                 Bounded,
                 Integer,
+                Enum(..),
+                Show(..),
                 undefined)
 
 import Control.Monad (Monad(..),
-                      (=<<))
+                      (=<<),
+                      mapM,
+                      liftM)
 
 import Data.Bool (Bool(..), not)
 import Data.Bool.Unicode
@@ -24,12 +26,18 @@ import Data.List ((++),
                   elem,
                   zip,
                   zipWith,
+                  transpose,
+                  intercalate,
+                  foldr,
                   filter,
                   sum,
                   null,
                   repeat)
 import Data.Maybe (Maybe(..))
+import Data.Monoid (Monoid(..))
 import Data.Ord (Ord(..))
+import Data.Semigroup (Semigroup (..))
+import Data.String (String(..))
 import Data.Tuple (fst,
                    snd)
 import Data.Tuple.Extra (dupe, second)
@@ -39,52 +47,108 @@ import Data.Variable (Variable(..),
                       getVars,
                       getDomains)
 import Util.List
-import Util.Num
+import Util.Bool ((⊻!),
+                  generalAnd)
 
-data Constraint a = Constraint { constraintType :: ConstraintType, factors :: [a], refs :: [VariableRef], constant :: a }
+data Constraint fac var res con = Constraint {factors :: [fac],
+                                              refs :: [VariableRef],
+                                              constant :: con,
+                                              combineOp :: [res] -> res,
+                                              compareOp :: res -> con -> Bool,
+                                              factorOp :: fac -> var -> res,
+                                              defaultFactor :: fac}
 
-deriving instance (Show a) => Show (Constraint a)
-deriving instance (Eq a) => Eq (Constraint a)
+generalRelation :: (Monoid fac, Monoid res, Monoid con) => [fac] -> [VariableRef] -> (fac -> var -> res) -> (res -> con -> Bool) -> Constraint fac var res con
+generalRelation fs rs factOp compOp = Constraint {factors = fs,
+                                         refs = rs,
+                                         constant = mempty,
+                                         combineOp = mconcat,
+                                         compareOp = compOp,
+                                         factorOp = factOp,
+                                         defaultFactor = mempty
+                                        }
 
-data ConstraintType = LinearEQ | LinearNE | LinearLT | BooleanConjunction deriving (Show, Enum, Ord, Eq, Bounded)
+specializedRelation :: (Monoid n, Monoid n, Monoid n) => [n] -> [VariableRef] -> (n -> n -> Bool) -> Constraint n n n n
+specializedRelation fs rs compOp = Constraint {factors = fs,
+                                        refs = rs,
+                                        constant = mempty,
+                                        combineOp = mconcat,
+                                        compareOp = compOp,
+                                        factorOp = (<>),
+                                        defaultFactor = mempty
+                                         }
 
-combineOperator :: (Foldable t) => ConstraintType -> t Integer -> Integer
-combineOperator LinearEQ = sum
-combineOperator LinearLT = sum
-combineOperator LinearNE = sum
-combineOperator BooleanConjunction = integerAnd
+
+linearEquals :: (Num n, Eq n) => [n] -> [VariableRef] -> n -> Constraint n n n n
+linearEquals fs rs cs = Constraint {factors = fs,
+                                    refs = rs,
+                                    constant = cs,
+                                    combineOp = sum,
+                                    compareOp = (==),
+                                    factorOp = (*),
+                                    defaultFactor = 1}
+
+linearNotEquals :: (Num n, Eq n) => [n] -> [VariableRef] -> n -> Constraint n n n n
+linearNotEquals fs rs cs = Constraint {factors = fs,
+                                       refs = rs,
+                                       constant = cs,
+                                       combineOp = sum,
+                                       compareOp = (/=),
+                                       factorOp = (*),
+                                       defaultFactor = 1}
+
+linearLessThan :: (Num n, Eq n, Ord n) => [n] -> [VariableRef] -> n -> Constraint n n n n
+linearLessThan fs rs cs = Constraint {factors = fs,
+                                      refs = rs,
+                                      constant = cs,
+                                      combineOp = sum,
+                                      compareOp = (<),
+                                      factorOp = (*),
+                                      defaultFactor = 1}
+
+booleanConjunction :: [Bool] -> [VariableRef] -> Constraint Bool Bool Bool Bool
+booleanConjunction fs rs = Constraint {factors = fs,
+                                       refs = rs,
+                                       constant = True,
+                                       combineOp = and,
+                                       compareOp = (==),
+                                       factorOp = (⊻),
+                                       defaultFactor = False}
 
 
-compareOperator :: (Eq a, Ord a) => ConstraintType -> (a -> a -> Bool)
-compareOperator LinearEQ = (==)
-compareOperator LinearNE = (/=)
-compareOperator LinearLT = (<)
-compareOperator BooleanConjunction = (==)
 
-factorOperator :: ConstraintType -> (Integer -> Integer -> Integer)
-factorOperator LinearEQ = (*)
-factorOperator LinearNE = (*)
-factorOperator LinearLT = (*)
-factorOperator BooleanConjunction = (⊻!)
+prettyConstraint :: (Show factor, Show constant) => Constraint factor v r constant -> String -> String -> String -> String
+prettyConstraint constraint factorOpString combineOpString compareOpString = intercalate combineOpString
+  (zipWith (\a b -> a ++ factorOpString ++ b) (map show factors') refs') ++ compareOpString ++ show constant'
+  where
+    refs'     = refs      constraint
+    constant' = constant  constraint
+    factors'  = factors   constraint ++ (repeat . defaultFactor) constraint
 
-defaultFactor :: ConstraintType -> Integer
-defaultFactor LinearEQ = 1
-defaultFactor LinearNE = 1
-defaultFactor LinearLT = 1
-defaultFactor BooleanConjunction = 0
 
-isSat ::  Constraint Integer -> [Variable Integer] -> Maybe Bool
+isSat ::  Constraint factor vars res cons -> [Variable vars] -> Maybe Bool
 isSat cons vars = (return . not . null) =<< listSat cons vars
 
-listSat ::  Constraint Integer -> [Variable Integer] -> Maybe [[Integer]]
-listSat cons vars = do
-  scaledDomains <- scaleDomains cons vars
-  let c = choices scaledDomains
-  return (map (map fst) (filter (flip ((compareOperator . constraintType) cons) (constant cons) . (combineOperator . constraintType) cons . map snd) c))
+listSat :: Constraint fac var res con -> [Variable var] -> Maybe [[var]]
+listSat constraint vars = do
+  fs <- getFactored constraint vars
+  let fs' = choices fs
+  return (map (map fst) (filter ((`compare'` constant') . combine' . map snd) fs'))
+  where
+    constant' = constant  constraint
+    combine'  = combineOp constraint
+    compare'  = compareOp constraint
 
-scaleDomains :: Constraint Integer -> [Variable Integer] -> Maybe [[(Integer, Integer)]]
-scaleDomains cons vars = do
-  vs <- getVars (refs cons) vars
+getFactored :: Constraint fac var res con -> [Variable var] -> Maybe [[(var, res)]]
+getFactored constraint vars = do
+  vs <- (flip getVars vars . refs) constraint
   let domains = getDomains vs
-  let domainsWithFactor = zipWith (\ds f -> map (\d -> (d, (factorOperator . constraintType) cons f d)) ds) domains (factors cons ++ repeat ((defaultFactor . constraintType) cons))
-  return domainsWithFactor
+  return (zipWith (\f ds -> map (\d -> (d, f `factor'` d)) ds) factors' domains)
+  where
+    factors'  = factors   constraint ++ (repeat . defaultFactor) constraint
+    factor'   = factorOp  constraint
+
+refineDomains :: Constraint fac var res con -> [Variable var] -> Maybe [Variable var]
+refineDomains cons vars = do
+  ds <- listSat cons vars
+  return (zipWith (\v d -> v {domain=d}) vars (transpose ds))
